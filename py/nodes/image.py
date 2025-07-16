@@ -5,6 +5,7 @@ import numpy as np
 import comfy.utils
 import comfy.model_management
 import shutil
+import logging
 from comfy_extras.nodes_compositing import JoinImageWithAlpha
 from server import PromptServer
 from nodes import MAX_RESOLUTION, NODE_CLASS_MAPPINGS as ALL_NODE_CLASS_MAPPINGS
@@ -1821,31 +1822,113 @@ class loadImageBase64:
     if len(image.shape) > 2 and image.shape[2] >= 4:
       return cv2.cvtColor(image, cv2.COLOR_BGRA2RGB)
     return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
+  
   def load_image(self, base64_data, image_output, save_prefix, prompt=None, extra_pnginfo=None):
-    nparr = np.frombuffer(base64.b64decode(base64_data), np.uint8)
-
-    result = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
-    channels = cv2.split(result)
-    if len(channels) > 3:
-      mask = channels[3].astype(np.float32) / 255.0
-      mask = torch.from_numpy(mask)
-    else:
-      mask = torch.ones(channels[0].shape, dtype=torch.float32, device="cpu")
-
-    result = self.convert_color(result)
-    result = result.astype(np.float32) / 255.0
-    new_images = torch.from_numpy(result)[None,]
-
-    results = easySave(new_images, save_prefix, image_output, None, None)
-    mask = mask.unsqueeze(0)
-
-    if image_output in ("Hide", "Hide/Save"):
-      return {"ui": {},
-              "result": (new_images, mask)}
-
-    return {"ui": {"images": results},
-            "result": (new_images, mask)}
+    # Set up logging
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+    
+    try:
+        logger.info(f"Starting load_image with save_prefix: {save_prefix}, image_output: {image_output}")
+        logger.info(f"Base64 data length: {len(base64_data)} characters")
+        
+        # Decode base64
+        logger.debug("Decoding base64 data...")
+        nparr = np.frombuffer(base64.b64decode(base64_data), np.uint8)
+        logger.info(f"Decoded numpy array shape: {nparr.shape}, dtype: {nparr.dtype}, size: {nparr.size} bytes")
+        
+        # Decode image
+        logger.debug("Decoding image with cv2...")
+        result = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+        
+        if result is None:
+            logger.error("cv2.imdecode returned None - failed to decode image")
+            raise ValueError("Failed to decode image from base64 data")
+        
+        logger.info(f"Decoded image shape: {result.shape}, dtype: {result.dtype}")
+        logger.info(f"Image dimensions: {result.shape[1]}x{result.shape[0]} pixels")
+        
+        # Split channels
+        logger.debug("Splitting image channels...")
+        channels = cv2.split(result)
+        logger.info(f"Number of channels: {len(channels)}")
+        
+        if len(channels) > 0:
+            for i, channel in enumerate(channels):
+                logger.debug(f"Channel {i} shape: {channel.shape}, dtype: {channel.dtype}")
+        
+        if len(channels) == 0:
+            logger.error("No channels found in image")
+            raise ValueError("No channels found in image")
+        elif len(channels) > 3:
+            logger.info("Image has alpha channel, using it as mask")
+            mask = channels[3].astype(np.float32) / 255.0
+            mask = torch.from_numpy(mask)
+            logger.debug(f"Alpha mask shape: {mask.shape}, dtype: {mask.dtype}")
+            if torch.cuda.is_available():
+                mask = mask.cuda()
+                logger.debug("Moved alpha mask to CUDA")
+        else:
+            logger.info("No alpha channel, creating default mask")
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.debug(f"Using device: {device}")
+            logger.debug(f"Creating mask with shape: {channels[0].shape}")
+            mask = torch.ones(channels[0].shape, dtype=torch.float32, device=device)
+            logger.debug(f"Created mask shape: {mask.shape}, device: {mask.device}")
+        
+        # Convert color
+        logger.debug("Converting image color...")
+        result = self.convert_color(result)
+        logger.info(f"After color conversion - shape: {result.shape}, dtype: {result.dtype}")
+        
+        # Normalize
+        logger.debug("Normalizing image to 0-1 range...")
+        result = result.astype(np.float32) / 255.0
+        logger.debug(f"After normalization - min: {result.min()}, max: {result.max()}")
+        
+        # Convert to tensor
+        logger.debug("Converting to PyTorch tensor...")
+        new_images = torch.from_numpy(result)[None,]
+        logger.info(f"Tensor shape: {new_images.shape}, dtype: {new_images.dtype}")
+        
+        # Move to GPU if available
+        if torch.cuda.is_available():
+            logger.debug("Moving tensor to CUDA...")
+            new_images = new_images.cuda()
+            logger.debug(f"Tensor device: {new_images.device}")
+        
+        # Save images
+        logger.debug("Saving images...")
+        results = easySave(new_images, save_prefix, image_output, None, None)
+        logger.info(f"Save results: {len(results) if results else 0} files")
+        
+        # Process mask
+        logger.debug("Processing mask...")
+        mask = mask.unsqueeze(0)
+        logger.debug(f"Final mask shape: {mask.shape}, device: {mask.device}")
+        
+        # Memory info if CUDA
+        if torch.cuda.is_available():
+            logger.debug(f"GPU memory allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+            logger.debug(f"GPU memory cached: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
+        
+        logger.info("load_image completed successfully")
+        
+        if image_output in ("Hide", "Hide/Save"):
+            logger.debug("Returning hidden output")
+            return {"ui": {},
+                    "result": (new_images, mask)}
+        
+        logger.debug("Returning normal output with UI")
+        return {"ui": {"images": results},
+                "result": (new_images, mask)}
+                
+    except Exception as e:
+        logger.error(f"Error in load_image: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise
 
 class imageToBase64:
     @classmethod
