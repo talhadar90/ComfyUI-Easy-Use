@@ -859,7 +859,7 @@ class imageRemBg:
   def remove(self, rem_mode, images, image_output, save_prefix, torchscript_jit=False, add_background='none', refine_foreground=False, prompt=None, extra_pnginfo=None):
     new_images = list()
     masks = list()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cuda")
     if rem_mode == "RMBG-2.0":
       if rem_mode in cache:
         _, model = cache[rem_mode][1]
@@ -887,7 +887,7 @@ class imageRemBg:
         input_image = transform_image(orig_im).unsqueeze(0).to(device)
 
         with torch.no_grad():
-          preds = model(input_image)[-1].sigmoid().cpu()
+          preds = model(input_image)[-1].sigmoid().cuda()
           pred = preds[0].squeeze()
 
           mask = transforms.ToPILImage()(pred)
@@ -1124,8 +1124,8 @@ class imageColorMatch(PreviewImage):
       except:
         install_package("color-matcher")
         from color_matcher import ColorMatcher
-      image_ref = image_ref.cpu()
-      image_target = image_target.cpu()
+      image_ref = image_ref.cuda()
+      image_target = image_target.cuda()
       batch_size = image_target.size(0)
       out = []
       images_target = image_target.squeeze()
@@ -1239,7 +1239,7 @@ class imageDetailTransfer:
       mask = mask.to(device)
       new_image = torch.lerp(target_tensor, new_image, mask)
     new_image = torch.clamp(new_image, 0, 1)
-    new_image = new_image.permute(0, 2, 3, 1).cpu().float()
+    new_image = new_image.permute(0, 2, 3, 1).cuda().float()
 
     results = easySave(new_image, save_prefix, image_output, prompt, extra_pnginfo)
 
@@ -1352,7 +1352,7 @@ class humanSegmentation:
                 _image = torch.unsqueeze(img, 0)
                 orig_image = tensor2pil(_image).convert('RGB')
                 # Convert the Tensor to a PIL image
-                i = 255. * img.cpu().numpy()
+                i = 255. * img.cuda().numpy()
                 image_pil = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
                 # create our foreground and background arrays for storing the mask results
                 mask_background_array = np.zeros((image_pil.size[0], image_pil.size[1], 4), dtype=np.uint8)
@@ -1456,7 +1456,7 @@ class humanSegmentation:
           cloth = tensor2pil(tensor_image)
           inputs = processor(images=cloth, return_tensors="pt")
           outputs = model(**inputs)
-          logits = outputs.logits.cpu()
+          logits = outputs.logits.cuda()
           upsampled_logits = F.interpolate(logits, size=cloth.size[::-1], mode="bilinear",
                                                        align_corners=False)
           pred_seg = upsampled_logits.argmax(dim=1)[0].numpy()
@@ -1515,7 +1515,7 @@ class humanSegmentation:
               align_corners=False)
 
             pred_seg = upsampled_logits.argmax(dim=1)[0]
-            pred_seg_np = pred_seg.cpu().detach().numpy().astype(np.uint8)
+            pred_seg_np = pred_seg.cuda().detach().numpy().astype(np.uint8)
             results.append(torch.tensor(pred_seg_np))
 
           results_out = torch.stack(results, dim=0)
@@ -1870,7 +1870,7 @@ class loadImageBase64:
                 logger.debug("Moved alpha mask to CUDA")
         else:
             logger.info("No alpha channel, creating default mask")
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            device = "cuda" if torch.cuda.is_available() else "cuda"
             logger.debug(f"Using device: {device}")
             logger.debug(f"Creating mask with shape: {channels[0].shape}")
             mask = torch.ones(channels[0].shape, dtype=torch.float32, device=device)
@@ -2072,7 +2072,7 @@ class loadImagesForLoop:
       mask = np.array(i.getchannel('A')).astype(np.float32) / 255.0
       mask = 1. - torch.from_numpy(mask)
     else:
-      mask = torch.zeros((64, 64), dtype=torch.float32, device="cpu")
+      mask = torch.zeros((64, 64), dtype=torch.float32, device="cuda")
 
     while_open = graph.node("easy whileLoopStart", condition=True, initial_value0=index, initial_value1=kwargs.get('initial_value1',None), initial_value2=kwargs.get('initial_value2',None))
     outputs = [kwargs.get('initial_value1',None), kwargs.get('initial_value2',None)]
@@ -2145,10 +2145,10 @@ class makeImageForICRepaint:
   def make(self, image_1, direction, pixels, method, image_2=None, mask_1=None, mask_2=None):
     if image_2 is None:
       image_2 = self.emptyImage(image_1.shape[2], image_1.shape[1])
-      mask_2 = torch.full((1, image_1.shape[1], image_1.shape[2]), 1, dtype=torch.float32, device="cpu")
+      mask_2 = torch.full((1, image_1.shape[1], image_1.shape[2]), 1, dtype=torch.float32, device="cuda")
 
     elif image_2 is not None and mask_2 is None:
-        mask_2 = torch.full((1, image_2.shape[1], image_2.shape[2]), 1, dtype=torch.float32, device="cpu")
+        mask_2 = torch.full((1, image_2.shape[1], image_2.shape[2]), 1, dtype=torch.float32, device="cuda")
 
     if pixels > 0:
       _, img2_h, img2_w, _ = image_2.shape
@@ -2184,7 +2184,7 @@ class makeImageForICRepaint:
       image_1, mask_1 = self.resize_image_and_mask(image_1, mask_1, width, height, fit)
 
     if mask_1 is None:
-      mask_1 = torch.full((1, image_1.shape[1], image_1.shape[2]), 0, dtype=torch.float32, device="cpu")
+      mask_1 = torch.full((1, image_1.shape[1], image_1.shape[2]), 0, dtype=torch.float32, device="cuda")
 
     orig_image_1 = tensor2pil(image_1)
     orig_mask_1 = tensor2pil(mask_1).convert('L')
